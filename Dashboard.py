@@ -12,7 +12,7 @@ st.set_page_config(page_title="NextGen Strategy Dashboard", page_icon="🌍", la
 # ----------------------------------------------------
 @st.cache_data
 def load_data():
-    file_path = "Cost Calculation Scenarios_2.xlsx"
+    file_path = "Cost Calculation Scenarios.xlsx"
     
     sheet_map = {
         'Baseline 2025': ('Baseline', '2025'),
