@@ -51,23 +51,39 @@ def load_data():
             c_seats = find_col(df.columns, ['seat'])
             c_cargo = find_col(df.columns, ['cargo'])
             
-            # Brandstof extractie per scenario
-            c_liq = c_h2 = c_elec = None
-            for c in df.columns:
-                if 'hydrogen' in str(c).lower() and 'cost' not in str(c).lower(): c_h2 = c
-                if 'electric' in str(c).lower() and 'cost' not in str(c).lower(): c_elec = c
-                
-            if scenario == 'Hybrid-Electric':
-                for c in df.columns:
-                    if 'hefa' in str(c).lower() and 'cost' not in str(c).lower(): c_liq = c
-            elif scenario != 'Hydrogen':
-                for c in df.columns:
-                    if 'fuel' in str(c).lower() and 'jet' not in str(c).lower() and 'cost' not in str(c).lower(): c_liq = c
-
             # Data kopiëren en null-waarden opschonen
             temp = df[[c_type, c_cost, c_rev, c_co2, c_nox, c_sox, c_freq, c_ticket, c_seats, c_cargo]].dropna(subset=[c_type]).copy()
             freq_numeric = pd.to_numeric(temp[c_freq], errors='coerce').fillna(0)
             
+            # Brandstof berekening: De absolute, waterdichte manier voor 100% data integriteit.
+            if scenario == 'Baseline':
+                # Zoek specifiek naar Jet-A1 en SAF kolommen om de 97% + 3% mix op te tellen
+                jet_col = find_col(df.columns, ['jet-a1 fuel', 'jet a'])
+                saf_col = [c for c in df.columns if 'saf' in str(c).lower() and 'cost' not in str(c).lower() and c != jet_col][0]
+                temp['Liquid Fuel'] = pd.to_numeric(df[jet_col], errors='coerce').fillna(0) + pd.to_numeric(df[saf_col], errors='coerce').fillna(0)
+                temp['Electricity'] = 0
+                temp['Hydrogen'] = 0
+                
+            elif scenario == '100% SAF':
+                # Pak expliciet HEFA
+                hefa_col = [c for c in df.columns if 'hefa' in str(c).lower() and 'cost' not in str(c).lower()][0]
+                temp['Liquid Fuel'] = pd.to_numeric(df[hefa_col], errors='coerce').fillna(0)
+                temp['Electricity'] = 0
+                temp['Hydrogen'] = 0
+                
+            elif scenario == 'Hybrid-Electric':
+                hefa_col = [c for c in df.columns if 'hefa' in str(c).lower() and 'cost' not in str(c).lower()][0]
+                elec_col = [c for c in df.columns if 'electric' in str(c).lower() and 'cost' not in str(c).lower()][0]
+                temp['Liquid Fuel'] = pd.to_numeric(df[hefa_col], errors='coerce').fillna(0)
+                temp['Electricity'] = pd.to_numeric(df[elec_col], errors='coerce').fillna(0)
+                temp['Hydrogen'] = 0
+                
+            elif scenario == 'Hydrogen':
+                h2_col = [c for c in df.columns if 'hydrogen' in str(c).lower() and 'cost' not in str(c).lower()][0]
+                temp['Liquid Fuel'] = 0
+                temp['Electricity'] = 0
+                temp['Hydrogen'] = pd.to_numeric(df[h2_col], errors='coerce').fillna(0)
+
             # Totalen berekenen
             temp[c_cost] = pd.to_numeric(temp[c_cost], errors='coerce').fillna(0) * freq_numeric
             temp[c_rev] = pd.to_numeric(temp[c_rev], errors='coerce').fillna(0) * freq_numeric
@@ -79,9 +95,6 @@ def load_data():
             temp['Ticket Price [€]'] = pd.to_numeric(temp[c_ticket], errors='coerce').fillna(0)
             temp['Seats'] = pd.to_numeric(temp[c_seats], errors='coerce').fillna(0)
             temp['Cargo (Tons)'] = pd.to_numeric(temp[c_cargo], errors='coerce').fillna(0)
-            temp['Liquid Fuel'] = pd.to_numeric(df[c_liq], errors='coerce').fillna(0) if c_liq else 0
-            temp['Electricity'] = pd.to_numeric(df[c_elec], errors='coerce').fillna(0) if c_elec else 0
-            temp['Hydrogen'] = pd.to_numeric(df[c_h2], errors='coerce').fillna(0) if c_h2 else 0
 
             temp = temp[[c_type, c_cost, c_rev, c_co2, c_nox, c_sox, 'Ticket Price [€]', 'Seats', 'Cargo (Tons)', 'Liquid Fuel', 'Electricity', 'Hydrogen']]
             temp.columns = ['Flight Type', 'Total Costs [€]', 'Total Revenue [€]', 'CO2 Emissions [tons]', 'NOx Emissions [tons]', 'SOx Emissions [tons]', 'Ticket Price [€]', 'Seats', 'Cargo (Tons)', 'Liquid Fuel', 'Electricity', 'Hydrogen']
@@ -154,7 +167,6 @@ for i, (scen, yr, label) in enumerate(display_targets):
 
 st.write("") 
 
-# --- DE 4 TABS ---
 tab1, tab2, tab3, tab4 = st.tabs(["🌍 Overall Impact & Financials", "✈️ Haul Deep Dive", "⚖️ Feasibility", "📊 Operational KPIs (Grafieken)"])
 
 with tab1:
