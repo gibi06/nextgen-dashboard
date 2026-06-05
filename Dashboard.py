@@ -36,107 +36,82 @@ def load_data():
         try:
             df = pd.read_excel(file_path, sheet_name=sheet, skiprows=5)
             
+            # Basis kolommen
             c_type = [c for c in df.columns if 'flight type' in str(c).lower()][0]
             c_cost = [c for c in df.columns if 'total cost' in str(c).lower()][0]
-            
             rev_cols = [c for c in df.columns if 'revenue' in str(c).lower() or 'revenu' in str(c).lower()]
             c_rev = rev_cols[-1] 
-            
             c_co2 = [c for c in df.columns if 'total co2' in str(c).lower()][0]
             c_nox = [c for c in df.columns if 'total nox' in str(c).lower()][0]
             c_sox = [c for c in df.columns if 'total sox' in str(c).lower()][0]
             c_freq = [c for c in df.columns if 'frequency' in str(c).lower() or 'flights' in str(c).lower()][0]
             
-            c_ticket = find_col(df.columns, ['ticket', 'price', 'prijs', 'fare'])
-            c_cap = find_col(df.columns, ['seat', 'stoel', 'cargo', 'pax', 'passenger', 'capacit'])
+            # KPI kolommen
+            c_ticket = find_col(df.columns, ['ticket'])
+            c_seats = find_col(df.columns, ['seat'])
+            c_cargo = find_col(df.columns, ['cargo'])
             
-            # --- NIEUW: Slimme extractie voor verschillende soorten brandstof ---
+            # Brandstof extractie per scenario
             c_liq = c_h2 = c_elec = None
-            
-            # 1. Zoek naar Hydrogen (alleen voor Scenario 3)
             for c in df.columns:
-                if 'hydrogen' in str(c).lower() and 'cost' not in str(c).lower():
-                    c_h2 = c
-                    break
-                    
-            # 2. Zoek naar Elektriciteit (alleen voor Scenario 2)
-            for c in df.columns:
-                if 'electric' in str(c).lower() and 'cost' not in str(c).lower():
-                    c_elec = c
-                    break
-                    
-            # 3. Zoek naar Liquid Fuel (Verschilt per scenario)
+                if 'hydrogen' in str(c).lower() and 'cost' not in str(c).lower(): c_h2 = c
+                if 'electric' in str(c).lower() and 'cost' not in str(c).lower(): c_elec = c
+                
             if scenario == 'Hybrid-Electric':
                 for c in df.columns:
-                    if 'hefa' in str(c).lower() and 'cost' not in str(c).lower():
-                        c_liq = c
-                        break
-            elif scenario != 'Hydrogen': # Baseline en 100% SAF
+                    if 'hefa' in str(c).lower() and 'cost' not in str(c).lower(): c_liq = c
+            elif scenario != 'Hydrogen':
                 for c in df.columns:
-                    if c.strip().lower() == 'fuel' or 'total fuel' in str(c).lower():
-                        c_liq = c
-                        break
+                    if 'fuel' in str(c).lower() and 'jet' not in str(c).lower() and 'cost' not in str(c).lower(): c_liq = c
 
             # Data kopiëren en null-waarden opschonen
-            temp = df[[c_type, c_cost, c_rev, c_co2, c_nox, c_sox, c_freq, c_ticket, c_cap]].dropna(subset=[c_type]).copy()
+            temp = df[[c_type, c_cost, c_rev, c_co2, c_nox, c_sox, c_freq, c_ticket, c_seats, c_cargo]].dropna(subset=[c_type]).copy()
             freq_numeric = pd.to_numeric(temp[c_freq], errors='coerce').fillna(0)
             
+            # Totalen berekenen
             temp[c_cost] = pd.to_numeric(temp[c_cost], errors='coerce').fillna(0) * freq_numeric
             temp[c_rev] = pd.to_numeric(temp[c_rev], errors='coerce').fillna(0) * freq_numeric
-            
             temp[c_co2] = pd.to_numeric(temp[c_co2], errors='coerce').fillna(0)
             temp[c_nox] = pd.to_numeric(temp[c_nox], errors='coerce').fillna(0)
             temp[c_sox] = pd.to_numeric(temp[c_sox], errors='coerce').fillna(0)
-            temp[c_ticket] = pd.to_numeric(temp[c_ticket], errors='coerce').fillna(0)
-            temp[c_cap] = pd.to_numeric(temp[c_cap], errors='coerce').fillna(0)
             
-            # --- NIEUW: Voeg de specifieke brandstofwaarden toe ---
-            temp['Liquid Fuel [kg]'] = pd.to_numeric(df[c_liq], errors='coerce').fillna(0) if c_liq else 0
-            temp['Electricity [Unit]'] = pd.to_numeric(df[c_elec], errors='coerce').fillna(0) if c_elec else 0
-            temp['Hydrogen [kg]'] = pd.to_numeric(df[c_h2], errors='coerce').fillna(0) if c_h2 else 0
-            
-            # Drop overbodige kolommen
-            temp = temp[[c_type, c_cost, c_rev, c_co2, c_nox, c_sox, c_ticket, c_cap, 'Liquid Fuel [kg]', 'Electricity [Unit]', 'Hydrogen [kg]']]
-            temp.columns = ['Flight Type', 'Total Costs [€]', 'Total Revenue [€]', 'CO2 Emissions [tons]', 'NOx Emissions [tons]', 'SOx Emissions [tons]', 'Ticket Price [€]', 'Seats/Cargo', 'Liquid Fuel [kg]', 'Electricity [Unit]', 'Hydrogen [kg]']
+            # Waarden opslaan
+            temp['Ticket Price [€]'] = pd.to_numeric(temp[c_ticket], errors='coerce').fillna(0)
+            temp['Seats'] = pd.to_numeric(temp[c_seats], errors='coerce').fillna(0)
+            temp['Cargo (Tons)'] = pd.to_numeric(temp[c_cargo], errors='coerce').fillna(0)
+            temp['Liquid Fuel'] = pd.to_numeric(df[c_liq], errors='coerce').fillna(0) if c_liq else 0
+            temp['Electricity'] = pd.to_numeric(df[c_elec], errors='coerce').fillna(0) if c_elec else 0
+            temp['Hydrogen'] = pd.to_numeric(df[c_h2], errors='coerce').fillna(0) if c_h2 else 0
+
+            temp = temp[[c_type, c_cost, c_rev, c_co2, c_nox, c_sox, 'Ticket Price [€]', 'Seats', 'Cargo (Tons)', 'Liquid Fuel', 'Electricity', 'Hydrogen']]
+            temp.columns = ['Flight Type', 'Total Costs [€]', 'Total Revenue [€]', 'CO2 Emissions [tons]', 'NOx Emissions [tons]', 'SOx Emissions [tons]', 'Ticket Price [€]', 'Seats', 'Cargo (Tons)', 'Liquid Fuel', 'Electricity', 'Hydrogen']
             
             temp['Scenario'] = scenario
             temp['Year'] = year
             dfs.append(temp)
         except Exception as e:
-            st.error(f"Error loading {sheet}: {e}")
+            continue
             
-    if not dfs:
-        st.error(f"Critical Error: Could not load any data. Please check if '{file_path}' exists and is not corrupted.")
-        st.stop()
-        
     routes_df = pd.concat(dfs, ignore_index=True)
     
+    # 1. OVERALL AGGREGATION
     agg_df = routes_df.groupby(['Scenario', 'Year']).agg({
-        'Total Costs [€]': 'sum',
-        'Total Revenue [€]': 'sum',
-        'CO2 Emissions [tons]': 'sum',
-        'NOx Emissions [tons]': 'sum',
-        'SOx Emissions [tons]': 'sum'
+        'Total Costs [€]': 'sum', 'Total Revenue [€]': 'sum',
+        'CO2 Emissions [tons]': 'sum', 'NOx Emissions [tons]': 'sum', 'SOx Emissions [tons]': 'sum'
     }).reset_index()
     agg_df['Profit Margin [%]'] = ((agg_df['Total Revenue [€]'] - agg_df['Total Costs [€]']) / agg_df['Total Revenue [€]']) * 100
-    
     agg_df['Total Costs [Billion €]'] = agg_df['Total Costs [€]'] / 1e9
     agg_df['Total Revenue [Billion €]'] = agg_df['Total Revenue [€]'] / 1e9
     
-    # --- NIEUW: Voeg de nieuwe brandstofkolommen toe aan de HAUL Aggregation ---
+    # 2. HAUL AGGREGATION & KPIs
     haul_df = routes_df.groupby(['Scenario', 'Year', 'Flight Type']).agg({
-        'Total Costs [€]': 'sum',
-        'Total Revenue [€]': 'sum',
-        'CO2 Emissions [tons]': 'sum',
-        'NOx Emissions [tons]': 'sum',
-        'SOx Emissions [tons]': 'sum',
-        'Ticket Price [€]': 'mean',
-        'Seats/Cargo': 'mean',
-        'Liquid Fuel [kg]': 'mean',
-        'Electricity [Unit]': 'mean',
-        'Hydrogen [kg]': 'mean'
+        'Total Costs [€]': 'sum', 'Total Revenue [€]': 'sum',
+        'CO2 Emissions [tons]': 'sum', 'NOx Emissions [tons]': 'sum', 'SOx Emissions [tons]': 'sum',
+        'Ticket Price [€]': 'mean', 'Seats': 'mean', 'Cargo (Tons)': 'mean',
+        'Liquid Fuel': 'mean', 'Electricity': 'mean', 'Hydrogen': 'mean'
     }).reset_index()
     
+    # 3. FEASIBILITY DATA
     feasibility = pd.read_excel(file_path, sheet_name="feasibility")
     if "Unnamed" in str(feasibility.columns[0]):
         feasibility.rename(columns={feasibility.columns[0]: "Scenario"}, inplace=True)
@@ -169,23 +144,21 @@ display_targets = [
 
 for i, (scen, yr, label) in enumerate(display_targets):
     val = agg_df.loc[(agg_df['Scenario'] == scen) & (agg_df['Year'] == yr), 'CO2 Emissions [tons]'].values[0]
-    
     if scen == 'Baseline' and yr == '2025':
         delta_str = None
     else:
         change = ((val - b_2025_co2) / b_2025_co2) * 100
         delta_str = f"{change:+.1f}% CO₂ Emissions" 
-
     with cols[i]:
         st.metric(label=label, value=f"{val / 1000:,.0f} kton CO₂", delta=delta_str, delta_color="inverse")
 
 st.write("") 
 
-tab1, tab2, tab3, tab4 = st.tabs(["🌍 Overall Impact & Financials", "✈️ Haul Deep Dive (Short vs Long)", "⚖️ Feasibility", "📊 Operational KPIs"])
+# --- DE 4 TABS ---
+tab1, tab2, tab3, tab4 = st.tabs(["🌍 Overall Impact & Financials", "✈️ Haul Deep Dive", "⚖️ Feasibility", "📊 Operational KPIs (Grafieken)"])
 
 with tab1:
     st.subheader("1. CO₂ Emissions (2025 vs 2050)")
-    
     def get_comp_data(metric_col, baseline_val, unit="kton", divisor=1000):
         data = []
         for scen in ['100% SAF', 'Hybrid-Electric', 'Hydrogen']:
@@ -224,7 +197,6 @@ with tab1:
     st.divider()
 
     st.subheader("2. Financial Volume & Profitability (2025 vs 2050)")
-    
     melted_fin = agg_df.melt(id_vars=['Scenario', 'Year'], value_vars=['Total Costs [Billion €]', 'Total Revenue [Billion €]'], var_name='Metric', value_name='Amount')
     f1, f2 = st.columns(2)
     with f1:
@@ -242,7 +214,6 @@ with tab1:
 
 with tab2:
     st.subheader("Analysis by Flight Type (Short Haul vs Long Haul)")
-    
     selected_year = st.radio("Select Year:", ["2025", "2050"], horizontal=True)
     filtered_haul = haul_df[haul_df['Year'] == selected_year]
     
@@ -261,7 +232,6 @@ with tab2:
     
 with tab3:
     st.subheader("Feasibility Assessment")
-    
     st.markdown("""
     <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; background-color: #ffffff; padding: 15px; border-radius: 8px; margin-bottom: 20px; color: white;">
         <div style="background-color: darkgreen; padding: 8px 15px; border-radius: 4px; font-weight: bold; text-align: center; flex: 1; margin: 0 5px;">++ Very strong</div>
@@ -288,15 +258,16 @@ with tab3:
     st.dataframe(styled_feasibility, use_container_width=True)
 
 # ==========================================
-# TAB 4: OPERATIONAL KPIs (NEW!)
+# TAB 4: OPERATIONAL KPIs (De nieuwe grafieken)
 # ==========================================
 with tab4:
-    st.subheader("Operational Flight Details")
-    st.markdown("Detailed breakdown of Ticket Prices, Capacity, and **the specific energy mix** required per individual flight.")
+    st.subheader("Operational & Technical KPIs")
+    st.markdown("Visualizing ticket prices, energy mix variations, and capacity per flight type.")
     
     ops_year = st.radio("Select Year for Operational Data:", ["2025", "2050"], horizontal=True, key="ops_year")
     ops_data = haul_df[haul_df['Year'] == ops_year]
     
+    # 1. Ticket Price Grafiek
     fig_tickets = px.bar(ops_data, x='Flight Type', y='Ticket Price [€]', color='Scenario', barmode='group', 
                          title=f"Average Ticket Price per Flight Type ({ops_year})", category_orders=scenario_order,
                          color_discrete_sequence=px.colors.qualitative.Pastel)
@@ -304,20 +275,22 @@ with tab4:
     fig_tickets.update_layout(yaxis=dict(range=[0, ops_data['Ticket Price [€]'].max() * 1.25]))
     st.plotly_chart(fig_tickets, use_container_width=True)
     
-    st.markdown(f"### Energy Mix & Operations Table ({ops_year})")
-    st.markdown("This table accurately separates standard liquid fuels, electrical energy, and hydrogen gas based on the requirements of each scenario.")
+    c_ops1, c_ops2 = st.columns(2)
     
-    # --- NIEUW: De drie nieuwe brandstof kolommen in de output tabel ---
-    display_ops = ops_data[['Scenario', 'Flight Type', 'Ticket Price [€]', 'Seats/Cargo', 'Liquid Fuel [kg]', 'Electricity [Unit]', 'Hydrogen [kg]']]
-    
-    st.dataframe(
-        display_ops.style.format({
-            'Ticket Price [€]': '€ {:,.2f}',
-            'Seats/Cargo': '{:,.0f}',
-            'Liquid Fuel [kg]': '{:,.0f}',
-            'Electricity [Unit]': '{:,.0f}',
-            'Hydrogen [kg]': '{:,.0f}'
-        }), 
-        use_container_width=True, 
-        hide_index=True
-    )
+    # 2. Energie Mix Grafiek
+    with c_ops1:
+        energy_data = ops_data.melt(id_vars=['Scenario', 'Flight Type'], value_vars=['Liquid Fuel', 'Hydrogen', 'Electricity'])
+        fig_energy = px.bar(energy_data, x='Scenario', y='value', color='variable', facet_col='Flight Type', 
+                            title=f"Energy Mix per Scenario ({ops_year})", category_orders=scenario_order)
+        # Fix labels voor facet_col
+        fig_energy.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
+        st.plotly_chart(fig_energy, use_container_width=True)
+
+    # 3. Capaciteit Grafiek (Seats & Cargo)
+    with c_ops2:
+        cap_data = ops_data.melt(id_vars=['Scenario', 'Flight Type'], value_vars=['Seats', 'Cargo (Tons)'])
+        fig_cap = px.bar(cap_data, x='Scenario', y='value', color='variable', facet_col='Flight Type', 
+                         barmode='group', title=f"Capacity: Seats vs Cargo ({ops_year})", category_orders=scenario_order)
+        # Fix labels voor facet_col
+        fig_cap.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
+        st.plotly_chart(fig_cap, use_container_width=True)
