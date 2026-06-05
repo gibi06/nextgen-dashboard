@@ -12,8 +12,7 @@ st.set_page_config(page_title="NextGen Strategy Dashboard", page_icon="🌍", la
 # ----------------------------------------------------
 @st.cache_data
 def load_data():
-    # UPDATED: Reference to the new file version
-    file_path = "Cost Calculation Scenarios.xlsx"
+    file_path = "Cost Calculation Scenarios_2.xlsx"
     
     sheet_map = {
         'Baseline 2025': ('Baseline', '2025'),
@@ -26,75 +25,119 @@ def load_data():
         'Scenario 3 2050': ('Hydrogen', '2050')
     }
 
+    def find_col(columns, keywords):
+        for col in columns:
+            if any(kw in str(col).lower() for kw in keywords):
+                return col
+        return columns[0] 
+
     dfs = []
     for sheet, (scenario, year) in sheet_map.items():
         try:
             df = pd.read_excel(file_path, sheet_name=sheet, skiprows=5)
             
-            # Find columns dynamically
             c_type = [c for c in df.columns if 'flight type' in str(c).lower()][0]
             c_cost = [c for c in df.columns if 'total cost' in str(c).lower()][0]
             
-            # Revenue
             rev_cols = [c for c in df.columns if 'revenue' in str(c).lower() or 'revenu' in str(c).lower()]
             c_rev = rev_cols[-1] 
             
-            # Emissions
             c_co2 = [c for c in df.columns if 'total co2' in str(c).lower()][0]
             c_nox = [c for c in df.columns if 'total nox' in str(c).lower()][0]
             c_sox = [c for c in df.columns if 'total sox' in str(c).lower()][0]
-            
-            # Find the Flight Frequency / # flights column dynamically
             c_freq = [c for c in df.columns if 'frequency' in str(c).lower() or 'flights' in str(c).lower()][0]
             
-            # Extract all needed columns
-            temp = df[[c_type, c_cost, c_rev, c_co2, c_nox, c_sox, c_freq]].dropna(subset=[c_type]).copy()
+            c_ticket = find_col(df.columns, ['ticket', 'price', 'prijs', 'fare'])
+            c_cap = find_col(df.columns, ['seat', 'stoel', 'cargo', 'pax', 'passenger', 'capacit'])
             
-            # Capture frequency as a strict numeric value
+            # --- NIEUW: Slimme extractie voor verschillende soorten brandstof ---
+            c_liq = c_h2 = c_elec = None
+            
+            # 1. Zoek naar Hydrogen (alleen voor Scenario 3)
+            for c in df.columns:
+                if 'hydrogen' in str(c).lower() and 'cost' not in str(c).lower():
+                    c_h2 = c
+                    break
+                    
+            # 2. Zoek naar Elektriciteit (alleen voor Scenario 2)
+            for c in df.columns:
+                if 'electric' in str(c).lower() and 'cost' not in str(c).lower():
+                    c_elec = c
+                    break
+                    
+            # 3. Zoek naar Liquid Fuel (Verschilt per scenario)
+            if scenario == 'Hybrid-Electric':
+                for c in df.columns:
+                    if 'hefa' in str(c).lower() and 'cost' not in str(c).lower():
+                        c_liq = c
+                        break
+            elif scenario != 'Hydrogen': # Baseline en 100% SAF
+                for c in df.columns:
+                    if c.strip().lower() == 'fuel' or 'total fuel' in str(c).lower():
+                        c_liq = c
+                        break
+
+            # Data kopiëren en null-waarden opschonen
+            temp = df[[c_type, c_cost, c_rev, c_co2, c_nox, c_sox, c_freq, c_ticket, c_cap]].dropna(subset=[c_type]).copy()
             freq_numeric = pd.to_numeric(temp[c_freq], errors='coerce').fillna(0)
             
-            # Multiply per-flight Cost and Revenue by Frequency to get Annual Totals
             temp[c_cost] = pd.to_numeric(temp[c_cost], errors='coerce').fillna(0) * freq_numeric
             temp[c_rev] = pd.to_numeric(temp[c_rev], errors='coerce').fillna(0) * freq_numeric
             
-            # FIX: Convert emissions to numeric to handle Excel dashes ('-') which act as strings for zero.
             temp[c_co2] = pd.to_numeric(temp[c_co2], errors='coerce').fillna(0)
             temp[c_nox] = pd.to_numeric(temp[c_nox], errors='coerce').fillna(0)
             temp[c_sox] = pd.to_numeric(temp[c_sox], errors='coerce').fillna(0)
+            temp[c_ticket] = pd.to_numeric(temp[c_ticket], errors='coerce').fillna(0)
+            temp[c_cap] = pd.to_numeric(temp[c_cap], errors='coerce').fillna(0)
             
-            # NOTE: If your new Excel file lists emissions "per flight" (just like costs), 
-            # you must UNCOMMENT the 3 lines below to multiply them by frequency:
-            # temp[c_co2] = temp[c_co2] * freq_numeric
-            # temp[c_nox] = temp[c_nox] * freq_numeric
-            # temp[c_sox] = temp[c_sox] * freq_numeric
+            # --- NIEUW: Voeg de specifieke brandstofwaarden toe ---
+            temp['Liquid Fuel [kg]'] = pd.to_numeric(df[c_liq], errors='coerce').fillna(0) if c_liq else 0
+            temp['Electricity [Unit]'] = pd.to_numeric(df[c_elec], errors='coerce').fillna(0) if c_elec else 0
+            temp['Hydrogen [kg]'] = pd.to_numeric(df[c_h2], errors='coerce').fillna(0) if c_h2 else 0
             
-            # Drop the frequency column now as it is no longer needed
-            temp = temp[[c_type, c_cost, c_rev, c_co2, c_nox, c_sox]]
+            # Drop overbodige kolommen
+            temp = temp[[c_type, c_cost, c_rev, c_co2, c_nox, c_sox, c_ticket, c_cap, 'Liquid Fuel [kg]', 'Electricity [Unit]', 'Hydrogen [kg]']]
+            temp.columns = ['Flight Type', 'Total Costs [€]', 'Total Revenue [€]', 'CO2 Emissions [tons]', 'NOx Emissions [tons]', 'SOx Emissions [tons]', 'Ticket Price [€]', 'Seats/Cargo', 'Liquid Fuel [kg]', 'Electricity [Unit]', 'Hydrogen [kg]']
             
-            # Rename for standardization
-            temp.columns = ['Flight Type', 'Total Costs [€]', 'Total Revenue [€]', 'CO2 Emissions [tons]', 'NOx Emissions [tons]', 'SOx Emissions [tons]']
             temp['Scenario'] = scenario
             temp['Year'] = year
             dfs.append(temp)
         except Exception as e:
             st.error(f"Error loading {sheet}: {e}")
             
+    if not dfs:
+        st.error(f"Critical Error: Could not load any data. Please check if '{file_path}' exists and is not corrupted.")
+        st.stop()
+        
     routes_df = pd.concat(dfs, ignore_index=True)
     
-    # 1. OVERALL AGGREGATION
-    agg_df = routes_df.groupby(['Scenario', 'Year'])[['Total Costs [€]', 'Total Revenue [€]', 'CO2 Emissions [tons]', 'NOx Emissions [tons]', 'SOx Emissions [tons]']].sum().reset_index()
+    agg_df = routes_df.groupby(['Scenario', 'Year']).agg({
+        'Total Costs [€]': 'sum',
+        'Total Revenue [€]': 'sum',
+        'CO2 Emissions [tons]': 'sum',
+        'NOx Emissions [tons]': 'sum',
+        'SOx Emissions [tons]': 'sum'
+    }).reset_index()
     agg_df['Profit Margin [%]'] = ((agg_df['Total Revenue [€]'] - agg_df['Total Costs [€]']) / agg_df['Total Revenue [€]']) * 100
     
-    # Convert to Billions for Executive Display
     agg_df['Total Costs [Billion €]'] = agg_df['Total Costs [€]'] / 1e9
     agg_df['Total Revenue [Billion €]'] = agg_df['Total Revenue [€]'] / 1e9
     
-    # 2. HAUL AGGREGATION (Grouped by Long/Short Haul)
-    haul_df = routes_df.groupby(['Scenario', 'Year', 'Flight Type'])[['Total Costs [€]', 'Total Revenue [€]', 'CO2 Emissions [tons]', 'NOx Emissions [tons]', 'SOx Emissions [tons]']].sum().reset_index()
+    # --- NIEUW: Voeg de nieuwe brandstofkolommen toe aan de HAUL Aggregation ---
+    haul_df = routes_df.groupby(['Scenario', 'Year', 'Flight Type']).agg({
+        'Total Costs [€]': 'sum',
+        'Total Revenue [€]': 'sum',
+        'CO2 Emissions [tons]': 'sum',
+        'NOx Emissions [tons]': 'sum',
+        'SOx Emissions [tons]': 'sum',
+        'Ticket Price [€]': 'mean',
+        'Seats/Cargo': 'mean',
+        'Liquid Fuel [kg]': 'mean',
+        'Electricity [Unit]': 'mean',
+        'Hydrogen [kg]': 'mean'
+    }).reset_index()
     
-    # 3. FEASIBILITY DATA
     feasibility = pd.read_excel(file_path, sheet_name="feasibility")
-    
     if "Unnamed" in str(feasibility.columns[0]):
         feasibility.rename(columns={feasibility.columns[0]: "Scenario"}, inplace=True)
         
@@ -102,12 +145,10 @@ def load_data():
 
 agg_df, haul_df, feasibility = load_data()
 
-# --- Get Baselines for Math ---
 b_2025_co2 = agg_df.loc[(agg_df['Scenario'] == 'Baseline') & (agg_df['Year'] == '2025'), 'CO2 Emissions [tons]'].values[0]
 b_2025_nox = agg_df.loc[(agg_df['Scenario'] == 'Baseline') & (agg_df['Year'] == '2025'), 'NOx Emissions [tons]'].values[0]
 b_2025_sox = agg_df.loc[(agg_df['Scenario'] == 'Baseline') & (agg_df['Year'] == '2025'), 'SOx Emissions [tons]'].values[0]
 
-# --- UNIVERSAL CHART SORTING ORDER ---
 scenario_order = {'Scenario': ['Baseline', '100% SAF', 'Hybrid-Electric', 'Hydrogen']}
 
 # ----------------------------------------------------
@@ -117,7 +158,6 @@ st.title("🌍 NextGen Innovation Strategy Dashboard")
 st.markdown("Prioritizing Environmental Impact (CO₂, NOx, SOx) & Financial Feasibility of 2050 Aviation Transition Strategies.")
 st.divider()
 
-# --- TOP KPI METRICS ---
 st.subheader("Key Environmental Targets (2050 vs Current 2025 Baseline)")
 cols = st.columns(4)
 display_targets = [
@@ -137,21 +177,12 @@ for i, (scen, yr, label) in enumerate(display_targets):
         delta_str = f"{change:+.1f}% CO₂ Emissions" 
 
     with cols[i]:
-        st.metric(
-            label=label,
-            value=f"{val / 1000:,.0f} kton CO₂",
-            delta=delta_str,
-            delta_color="inverse" 
-        )
+        st.metric(label=label, value=f"{val / 1000:,.0f} kton CO₂", delta=delta_str, delta_color="inverse")
 
 st.write("") 
 
-# --- TABS ---
-tab1, tab2, tab3 = st.tabs(["🌍 Overall Impact & Financials", "✈️ Haul Deep Dive (Short vs Long)", "⚖️ Feasibility"])
+tab1, tab2, tab3, tab4 = st.tabs(["🌍 Overall Impact & Financials", "✈️ Haul Deep Dive (Short vs Long)", "⚖️ Feasibility", "📊 Operational KPIs"])
 
-# ==========================================
-# TAB 1: ENVIRONMENTAL & FINANCIAL OVERVIEW
-# ==========================================
 with tab1:
     st.subheader("1. CO₂ Emissions (2025 vs 2050)")
     
@@ -160,9 +191,7 @@ with tab1:
         for scen in ['100% SAF', 'Hybrid-Electric', 'Hydrogen']:
             scen_val = agg_df.loc[(agg_df['Scenario'] == scen) & (agg_df['Year'] == '2050'), metric_col].values[0]
             change = ((scen_val - baseline_val) / baseline_val) * 100
-            
             data.append({'Scenario': scen, 'Type': 'Baseline 2025', 'Value': baseline_val, 'Label': f"{baseline_val/divisor:,.0f} {unit}"})
-            
             if change > 0:
                 data.append({'Scenario': scen, 'Type': '2050 Projection', 'Value': scen_val, 'Label': f"{scen_val/divisor:,.0f} {unit} (<span style='color:red'>+{change:.1f}%</span>)"})
             else:
@@ -195,10 +224,8 @@ with tab1:
     st.divider()
 
     st.subheader("2. Financial Volume & Profitability (2025 vs 2050)")
-    st.markdown("Observe the financial cost required to achieve the environmental targets above (Values in **Billions**).")
     
     melted_fin = agg_df.melt(id_vars=['Scenario', 'Year'], value_vars=['Total Costs [Billion €]', 'Total Revenue [Billion €]'], var_name='Metric', value_name='Amount')
-    
     f1, f2 = st.columns(2)
     with f1:
         fig_fin = px.bar(melted_fin, x='Scenario', y='Amount', color='Metric', barmode='group', facet_col='Year', color_discrete_map={'Total Costs [Billion €]': '#EF553B', 'Total Revenue [Billion €]': '#00CC96'}, category_orders=scenario_order)
@@ -209,24 +236,12 @@ with tab1:
         
     with f2:
         fig_margin = px.bar(agg_df, x='Scenario', y='Profit Margin [%]', color='Year', barmode='group', text_auto='.1f', title='Profit Margin by Scenario', color_discrete_map={'2025': '#94A3B8', '2050': '#3B82F6'}, category_orders=scenario_order)
-        
-        # FIX: cliponaxis=False ensures negative text is not cut out of the chart's bounding box
         fig_margin.update_traces(texttemplate='%{y:.1f}%', textposition='outside', textfont_size=13, cliponaxis=False)
-        
-        # FIX: Let Plotly naturally scale both positive and negative values while adding a distinct zero line 
-        fig_margin.update_layout(
-            yaxis_title="Profit Margin (%)", 
-            yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black')
-        )
+        fig_margin.update_layout(yaxis_title="Profit Margin (%)", yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black'))
         st.plotly_chart(fig_margin, use_container_width=True)
 
-
-# ==========================================
-# TAB 2: HAUL DEEP DIVE (SHORT VS LONG)
-# ==========================================
 with tab2:
     st.subheader("Analysis by Flight Type (Short Haul vs Long Haul)")
-    st.markdown("Observe how costs and environmental impacts distribute across flight types. Use the toggle below to project 2050 outcomes.")
     
     selected_year = st.radio("Select Year:", ["2025", "2050"], horizontal=True)
     filtered_haul = haul_df[haul_df['Year'] == selected_year]
@@ -244,9 +259,6 @@ with tab2:
     display_table = filtered_haul[['Scenario', 'Flight Type', 'Total Costs [€]', 'Total Revenue [€]', 'CO2 Emissions [tons]', 'NOx Emissions [tons]', 'SOx Emissions [tons]']]
     st.dataframe(display_table, use_container_width=True, hide_index=True)
     
-# ==========================================
-# TAB 3: FEASIBILITY
-# ==========================================
 with tab3:
     st.subheader("Feasibility Assessment")
     
@@ -261,14 +273,7 @@ with tab3:
     """, unsafe_allow_html=True)
     
     def style_symbols(val):
-        color_mapping = {
-            '++': ('darkgreen', 'white'),
-            '+': ('#32CD32', 'black'),
-            '++/-': ('darkorange', 'white'),
-            '+/-': ('#FFA500', 'black'),
-            '-': ('red', 'white')
-        }
-        
+        color_mapping = {'++': ('darkgreen', 'white'), '+': ('#32CD32', 'black'), '++/-': ('darkorange', 'white'), '+/-': ('#FFA500', 'black'), '-': ('red', 'white')}
         val_str = str(val).strip()
         if val_str in color_mapping:
             bg_color, text_color = color_mapping[val_str]
@@ -281,3 +286,38 @@ with tab3:
         styled_feasibility = feasibility.style.applymap(style_symbols)
         
     st.dataframe(styled_feasibility, use_container_width=True)
+
+# ==========================================
+# TAB 4: OPERATIONAL KPIs (NEW!)
+# ==========================================
+with tab4:
+    st.subheader("Operational Flight Details")
+    st.markdown("Detailed breakdown of Ticket Prices, Capacity, and **the specific energy mix** required per individual flight.")
+    
+    ops_year = st.radio("Select Year for Operational Data:", ["2025", "2050"], horizontal=True, key="ops_year")
+    ops_data = haul_df[haul_df['Year'] == ops_year]
+    
+    fig_tickets = px.bar(ops_data, x='Flight Type', y='Ticket Price [€]', color='Scenario', barmode='group', 
+                         title=f"Average Ticket Price per Flight Type ({ops_year})", category_orders=scenario_order,
+                         color_discrete_sequence=px.colors.qualitative.Pastel)
+    fig_tickets.update_traces(texttemplate='€%{y:,.0f}', textposition='outside')
+    fig_tickets.update_layout(yaxis=dict(range=[0, ops_data['Ticket Price [€]'].max() * 1.25]))
+    st.plotly_chart(fig_tickets, use_container_width=True)
+    
+    st.markdown(f"### Energy Mix & Operations Table ({ops_year})")
+    st.markdown("This table accurately separates standard liquid fuels, electrical energy, and hydrogen gas based on the requirements of each scenario.")
+    
+    # --- NIEUW: De drie nieuwe brandstof kolommen in de output tabel ---
+    display_ops = ops_data[['Scenario', 'Flight Type', 'Ticket Price [€]', 'Seats/Cargo', 'Liquid Fuel [kg]', 'Electricity [Unit]', 'Hydrogen [kg]']]
+    
+    st.dataframe(
+        display_ops.style.format({
+            'Ticket Price [€]': '€ {:,.2f}',
+            'Seats/Cargo': '{:,.0f}',
+            'Liquid Fuel [kg]': '{:,.0f}',
+            'Electricity [Unit]': '{:,.0f}',
+            'Hydrogen [kg]': '{:,.0f}'
+        }), 
+        use_container_width=True, 
+        hide_index=True
+    )
