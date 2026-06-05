@@ -55,43 +55,48 @@ def load_data():
             temp = df[[c_type, c_cost, c_rev, c_co2, c_nox, c_sox, c_freq, c_ticket, c_seats, c_cargo]].dropna(subset=[c_type]).copy()
             freq_numeric = pd.to_numeric(temp[c_freq], errors='coerce').fillna(0)
             
-            # Brandstof berekening: De absolute, waterdichte manier voor 100% data integriteit.
+            # -----------------------------------------------------------------
+            # BRANDSTOF EXTRACTIE - DEFINITIEVE FIX
+            # -----------------------------------------------------------------
             if scenario == 'Baseline':
-                # Zoek specifiek naar Jet-A1 en SAF kolommen om de 97% + 3% mix op te tellen
-                jet_col = find_col(df.columns, ['jet-a1 fuel', 'jet a'])
-                saf_col = [c for c in df.columns if 'saf' in str(c).lower() and 'cost' not in str(c).lower() and c != jet_col][0]
-                temp['Liquid Fuel'] = pd.to_numeric(df[jet_col], errors='coerce').fillna(0) + pd.to_numeric(df[saf_col], errors='coerce').fillna(0)
+                # Pakt direct de totale 'Fuel' kolom (die JetA1 + SAF al bevat)
+                col_fuel = [c for c in df.columns if c.strip().lower() == 'fuel'][0]
+                temp['Liquid Fuel'] = pd.to_numeric(df[col_fuel], errors='coerce').fillna(0)
                 temp['Electricity'] = 0
                 temp['Hydrogen'] = 0
                 
             elif scenario == '100% SAF':
-                # Pak expliciet HEFA
-                hefa_col = [c for c in df.columns if 'hefa' in str(c).lower() and 'cost' not in str(c).lower()][0]
-                temp['Liquid Fuel'] = pd.to_numeric(df[hefa_col], errors='coerce').fillna(0)
+                # Pakt direct de totale 'Fuel' kolom (en voorkomt dat hij de 'HEFA' kosten-kolom pakt)
+                col_fuel = [c for c in df.columns if c.strip().lower() == 'fuel'][0]
+                temp['Liquid Fuel'] = pd.to_numeric(df[col_fuel], errors='coerce').fillna(0)
                 temp['Electricity'] = 0
                 temp['Hydrogen'] = 0
                 
             elif scenario == 'Hybrid-Electric':
-                hefa_col = [c for c in df.columns if 'hefa' in str(c).lower() and 'cost' not in str(c).lower()][0]
-                elec_col = [c for c in df.columns if 'electric' in str(c).lower() and 'cost' not in str(c).lower()][0]
+                # Pakt specifiek de 'Fuel HEFA' volumekolom en Electrics
+                hefa_col = [c for c in df.columns if c.strip().lower() == 'fuel hefa'][0]
+                elec_col = [c for c in df.columns if 'electric' in c.lower() and 'cost' not in c.lower()][0]
                 temp['Liquid Fuel'] = pd.to_numeric(df[hefa_col], errors='coerce').fillna(0)
                 temp['Electricity'] = pd.to_numeric(df[elec_col], errors='coerce').fillna(0)
                 temp['Hydrogen'] = 0
                 
             elif scenario == 'Hydrogen':
-                h2_col = [c for c in df.columns if 'hydrogen' in str(c).lower() and 'cost' not in str(c).lower()][0]
+                # Pakt specifiek de zuivere 'Hydrogen' kolom
+                h2_col = [c for c in df.columns if c.strip().lower() == 'hydrogen'][0]
                 temp['Liquid Fuel'] = 0
                 temp['Electricity'] = 0
                 temp['Hydrogen'] = pd.to_numeric(df[h2_col], errors='coerce').fillna(0)
 
-            # Totalen berekenen
+            # -----------------------------------------------------------------
+
+            # Totalen berekenen per jaar
             temp[c_cost] = pd.to_numeric(temp[c_cost], errors='coerce').fillna(0) * freq_numeric
             temp[c_rev] = pd.to_numeric(temp[c_rev], errors='coerce').fillna(0) * freq_numeric
             temp[c_co2] = pd.to_numeric(temp[c_co2], errors='coerce').fillna(0)
             temp[c_nox] = pd.to_numeric(temp[c_nox], errors='coerce').fillna(0)
             temp[c_sox] = pd.to_numeric(temp[c_sox], errors='coerce').fillna(0)
             
-            # Waarden opslaan
+            # Waarden opslaan per vlucht
             temp['Ticket Price [€]'] = pd.to_numeric(temp[c_ticket], errors='coerce').fillna(0)
             temp['Seats'] = pd.to_numeric(temp[c_seats], errors='coerce').fillna(0)
             temp['Cargo (Tons)'] = pd.to_numeric(temp[c_cargo], errors='coerce').fillna(0)
@@ -270,7 +275,7 @@ with tab3:
     st.dataframe(styled_feasibility, use_container_width=True)
 
 # ==========================================
-# TAB 4: OPERATIONAL KPIs (De nieuwe grafieken)
+# TAB 4: OPERATIONAL KPIs
 # ==========================================
 with tab4:
     st.subheader("Operational & Technical KPIs")
@@ -293,9 +298,17 @@ with tab4:
     with c_ops1:
         energy_data = ops_data.melt(id_vars=['Scenario', 'Flight Type'], value_vars=['Liquid Fuel', 'Hydrogen', 'Electricity'])
         fig_energy = px.bar(energy_data, x='Scenario', y='value', color='variable', facet_col='Flight Type', 
-                            title=f"Energy Mix per Scenario ({ops_year})", category_orders=scenario_order)
-        # Fix labels voor facet_col
+                            barmode='group', 
+                            title=f"Energy Mix per Scenario ({ops_year})", 
+                            category_orders=scenario_order,
+                            log_y=True, 
+                            color_discrete_map={
+                                'Liquid Fuel': '#3B82F6',   
+                                'Hydrogen': '#10B981',      
+                                'Electricity': '#F59E0B'    
+                            })
         fig_energy.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
+        fig_energy.update_layout(yaxis_title="Verbruik (Logaritmische Schaal)")
         st.plotly_chart(fig_energy, use_container_width=True)
 
     # 3. Capaciteit Grafiek (Seats & Cargo)
@@ -303,6 +316,5 @@ with tab4:
         cap_data = ops_data.melt(id_vars=['Scenario', 'Flight Type'], value_vars=['Seats', 'Cargo (Tons)'])
         fig_cap = px.bar(cap_data, x='Scenario', y='value', color='variable', facet_col='Flight Type', 
                          barmode='group', title=f"Capacity: Seats vs Cargo ({ops_year})", category_orders=scenario_order)
-        # Fix labels voor facet_col
         fig_cap.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
         st.plotly_chart(fig_cap, use_container_width=True)
