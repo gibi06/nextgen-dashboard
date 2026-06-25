@@ -154,4 +154,4 @@ display_targets = [('Baseline', '2025', 'Current Operations (2025)'), ('100% SAF
 
 for i, (scen, yr, label) in enumerate(display_targets):
     val = safe_val(agg_df, scen, yr, 'CO2 Emissions [tons]')
-    delta_str = None if (scen == 'Baseline' and yr == '2025') or b_2025_co2 == 0 else f"{((val - b_2025_co2) / b_2025_co2)
+    delta_str = None if (scen == 'Baseline' and yr == '2025') or b_2025_co2 == 0 else f"{((val - b_2025_co2) / b_2025_co2)}
