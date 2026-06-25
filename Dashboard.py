@@ -207,16 +207,16 @@ with tab1:
         fig_margin = px.bar(agg_df, x='Scenario', y='Profit Margin [%]', color='Year', barmode='group', text_auto='.1f', title='Company Profit Margin (%)', color_discrete_map={'2025': '#94A3B8', '2050': '#3B82F6'})
         st.plotly_chart(fig_margin, use_container_width=True, config=dl_config)
 
-    # --- DATA SOURCES SECTION (REQUIRED BY FEEDBACK) ---
+    # --- DATA SOURCES SECTION---
     st.divider()
     st.subheader("Data Sources & Methodology")
     st.markdown("""
-    To ensure transparency in our KPI calculations (as required by the **PPG, page 12/20**), we disclose the following:
-    - **Primary Data Source:** `Cost Calculation Scenarios.xlsx`
-    - **Methodology:** KPIs calculated by normalizing fuel/emission factors against yearly flight frequency across scenarios.
-    - **Disclaimer:** The financial metrics are projections based on the baseline 2025 operational model.
-    """)
-
+   **📚 Data Transparency & Sources:**
+All KPIs and metrics displayed in this dashboard are calculated using data directly extracted from the project file: **`Cost Calculation Scenarios.xlsx`**. 
+* **Financials:** Derived from flight frequencies, calculated ticket prices, and detailed cost breakdowns (e.g., crew, maintenance, fuel).
+* **Emissions & Sustainability:** CO₂ penalties are calculated using the 2050 assumption of €500/ton. Emission factors used: Jet-A1 (3.84 kg/kg) and SAF/HEFA (1.30 kg/kg).
+* **Feasibility:** Extracted directly from the qualitative assessment in the 'feasibility' tab.
+""")
 # ==========================================
 # TAB 2: HAUL DEEP DIVE
 # ==========================================
