@@ -43,7 +43,7 @@ def load_data():
             else:
                 if any(k in c_str for k in keywords):
                     return c
-        return df.columns[0] # Safe fallback to prevent IndexError
+        return df.columns[0]
 
     dfs = []
     for sheet, (scenario, year) in sheet_map.items():
@@ -112,14 +112,13 @@ def load_data():
             st.warning(f"Note: Could not fully process sheet '{sheet}' due to formatting. Check column names.")
             continue
             
-    # Fallback to prevent crash if data is completely empty
     if dfs:
         routes_df = pd.concat(dfs, ignore_index=True)
     else:
         st.error("Critical Error: No data could be processed. Please check the Excel file formatting.")
         st.stop()
     
-    # 1. OVERALL AGGREGATION
+    # OVERALL AGGREGATION
     agg_df = routes_df.groupby(['Scenario', 'Year']).agg({
         'Total Costs [€]': 'sum', 'Total Revenue [€]': 'sum',
         'CO2 Emissions [tons]': 'sum', 'NOx Emissions [tons]': 'sum', 'SOx Emissions [tons]': 'sum'
@@ -128,7 +127,7 @@ def load_data():
     agg_df['Total Costs [Billion €]'] = agg_df['Total Costs [€]'] / 1e9
     agg_df['Total Revenue [Billion €]'] = agg_df['Total Revenue [€]'] / 1e9
     
-    # 2. HAUL AGGREGATION & KPIs
+    # HAUL AGGREGATION
     haul_df = routes_df.groupby(['Scenario', 'Year', 'Flight Type']).agg({
         'Total Costs [€]': 'sum', 'Total Revenue [€]': 'sum',
         'CO2 Emissions [tons]': 'sum', 'NOx Emissions [tons]': 'sum', 'SOx Emissions [tons]': 'sum',
@@ -136,7 +135,7 @@ def load_data():
         'Liquid Fuel': 'mean', 'Electricity': 'mean', 'Hydrogen': 'mean'
     }).reset_index()
     
-    # 3. FEASIBILITY DATA
+    # FEASIBILITY DATA
     try:
         feasibility = pd.read_excel(file_path, sheet_name="feasibility")
         if "Unnamed" in str(feasibility.columns[0]):
@@ -148,10 +147,19 @@ def load_data():
 
 agg_df, haul_df, feasibility = load_data()
 
-# Safe data retrieval function for the UI to prevent crashes
+# Safe data retrieval
 def safe_val(df, scen, yr, col):
     val = df.loc[(df['Scenario'] == scen) & (df['Year'] == yr), col].values
     return val[0] if len(val) > 0 else 0
+
+def get_feas_val(scen, col_idx):
+    try:
+        match = feasibility[feasibility['Scenario'].str.contains(scen[:5], case=False, na=False)]
+        if not match.empty:
+            return match.iloc[0, col_idx]
+    except:
+        pass
+    return "N/A"
 
 b_2025_co2 = safe_val(agg_df, 'Baseline', '2025', 'CO2 Emissions [tons]')
 b_2025_nox = safe_val(agg_df, 'Baseline', '2025', 'NOx Emissions [tons]')
@@ -160,41 +168,73 @@ b_2025_sox = safe_val(agg_df, 'Baseline', '2025', 'SOx Emissions [tons]')
 scenario_order = {'Scenario': ['Baseline', '100% SAF', 'Hybrid-Electric', 'Hydrogen']}
 
 # ----------------------------------------------------
-# 3. DASHBOARD UI
+# 3. DASHBOARD UI - EXECUTIVE SUMMARY (ONE PAGE)
 # ----------------------------------------------------
 st.title("🌍 NextGen Innovation Strategy Dashboard")
-st.markdown("Prioritizing Environmental Impact (CO₂, NOx, SOx) & Financial Feasibility of 2050 Aviation Transition Strategies.")
+
+# --- DATA TRANSPARENCY SECTION ---
+st.info("""
+**📚 Data Transparency & Sources:**
+All KPIs and metrics displayed in this dashboard are calculated using data directly extracted from the project file: **`Cost Calculation Scenarios.xlsx`**. 
+* **Financials:** Derived from flight frequencies, calculated ticket prices, and detailed cost breakdowns (e.g., crew, maintenance, fuel) found in the sheet.
+* **Emissions & Sustainability:** CO₂ penalties are calculated using the 2050 assumption of €500/ton. Emission factors used: Jet-A1 (3.84 kg/kg) and SAF/HEFA (1.30 kg/kg).
+* **Feasibility:** Extracted directly from the qualitative assessment in the 'feasibility' tab.
+""")
+
+st.subheader("📋 Executive Summary: All Key Performance Indicators (2050)")
+st.markdown("This table provides a comprehensive one-page overview of all Sustainability, Financial, and Feasibility KPIs across the 2050 transition strategies, as requested in the PPG.")
+
+# --- ONE-PAGE KPI TABLE ---
+scenarios = ['Baseline', '100% SAF', 'Hybrid-Electric', 'Hydrogen']
+kpi_data = {
+    "KPI / Metric (2050 Projection)": [
+        "🌍 Total CO₂ Emissions (kton)",
+        "🌍 Total NOx Emissions (tons)",
+        "🌍 Total SOx Emissions (tons)",
+        "💰 Total Financial Costs (Billion €)",
+        "💰 Total Revenue (Billion €)",
+        "📈 Profit Margin (%)",
+        "✈️ Average Ticket Price (€)",
+        "⚖️ Technical Feasibility",
+        "⚖️ Regulatory Feasibility",
+        "⚖️ Safety Feasibility"
+    ]
+}
+
+for scen in scenarios:
+    co2 = safe_val(agg_df, scen, '2050', 'CO2 Emissions [tons]') / 1000
+    nox = safe_val(agg_df, scen, '2050', 'NOx Emissions [tons]')
+    sox = safe_val(agg_df, scen, '2050', 'SOx Emissions [tons]')
+    cost = safe_val(agg_df, scen, '2050', 'Total Costs [Billion €]')
+    rev = safe_val(agg_df, scen, '2050', 'Total Revenue [Billion €]')
+    margin = safe_val(agg_df, scen, '2050', 'Profit Margin [%]')
+    avg_ticket = haul_df[(haul_df['Year'] == '2050') & (haul_df['Scenario'] == scen)]['Ticket Price [€]'].mean()
+    
+    kpi_data[scen] = [
+        f"{co2:,.0f} kton",
+        f"{nox:,.0f} tons",
+        f"{sox:,.0f} tons",
+        f"€{cost:,.2f}B",
+        f"€{rev:,.2f}B",
+        f"{margin:,.1f}%",
+        f"€{avg_ticket:,.0f}" if pd.notnull(avg_ticket) else "N/A",
+        get_feas_val(scen, 1),
+        get_feas_val(scen, 2),
+        get_feas_val(scen, 3)
+    ]
+
+kpi_table = pd.DataFrame(kpi_data)
+st.dataframe(kpi_table, use_container_width=True, hide_index=True)
+
 st.divider()
 
-st.subheader("Key Environmental Targets (2050 vs Current 2025 Baseline)")
-cols = st.columns(4)
-display_targets = [
-    ('Baseline', '2025', 'Current Operations (2025)'),
-    ('100% SAF', '2050', '100% SAF Projection (2050)'),
-    ('Hybrid-Electric', '2050', 'Hybrid Projection (2050)'),
-    ('Hydrogen', '2050', 'Hydrogen Projection (2050)')
-]
+# ----------------------------------------------------
+# 4. DEEP DIVE VISUALIZATIONS (TABS)
+# ----------------------------------------------------
+st.markdown("### 📊 Interactive Deep-Dive Visualizations")
+tab1, tab2, tab3 = st.tabs(["🌍 Emissions & Financials", "✈️ Haul & Capacity Deep Dive", "⚡ Operational Energy Mix"])
 
-for i, (scen, yr, label) in enumerate(display_targets):
-    val = safe_val(agg_df, scen, yr, 'CO2 Emissions [tons]')
-    if scen == 'Baseline' and yr == '2025' or b_2025_co2 == 0:
-        delta_str = None
-    else:
-        change = ((val - b_2025_co2) / b_2025_co2) * 100
-        delta_str = f"{change:+.1f}% CO₂ Emissions" 
-    with cols[i]:
-        st.metric(label=label, value=f"{val / 1000:,.0f} kton CO₂", delta=delta_str, delta_color="inverse")
-
-st.write("") 
-
-# --- TABS ---
-tab1, tab2, tab3, tab4 = st.tabs(["🌍 Overall Impact & Financials", "✈️ Haul Deep Dive", "⚖️ Feasibility", "📊 Operational KPIs"])
-
-# ==========================================
-# TAB 1: OVERALL IMPACT & FINANCIALS
-# ==========================================
 with tab1:
-    st.subheader("1. CO₂ Emissions (2025 vs 2050)")
     def get_comp_data(metric_col, baseline_val, unit="kton", divisor=1000):
         data = []
         for scen in ['100% SAF', 'Hybrid-Electric', 'Hydrogen']:
@@ -215,55 +255,17 @@ with tab1:
     fig_co2.update_layout(yaxis_title="CO₂ Emissions [Tons]", yaxis=dict(range=[0, co2_df['Value'].max() * 1.25]))
     st.plotly_chart(fig_co2, use_container_width=True, config=dl_config)
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.subheader("NOx Emissions [Tons]")
-        nox_df = get_comp_data('NOx Emissions [tons]', b_2025_nox, unit="tons", divisor=1)
-        fig_nox = px.bar(nox_df, x='Scenario', y='Value', color='Type', barmode='group', text='Label', 
-                         title="Projected NOx Emissions by Scenario",
-                         color_discrete_map={'Baseline 2025': '#94A3B8', '2050 Projection': '#F59E0B'}, category_orders={'Scenario': ['100% SAF', 'Hybrid-Electric', 'Hydrogen']})
-        fig_nox.update_traces(textposition='outside', textfont_size=12)
-        fig_nox.update_layout(yaxis=dict(range=[0, nox_df['Value'].max() * 1.25]))
-        st.plotly_chart(fig_nox, use_container_width=True, config=dl_config)
-        
-    with c2:
-        st.subheader("SOx Emissions [Tons]")
-        sox_df = get_comp_data('SOx Emissions [tons]', b_2025_sox, unit="tons", divisor=1)
-        fig_sox = px.bar(sox_df, x='Scenario', y='Value', color='Type', barmode='group', text='Label', 
-                         title="Projected SOx Emissions by Scenario",
-                         color_discrete_map={'Baseline 2025': '#94A3B8', '2050 Projection': '#EF4444'}, category_orders={'Scenario': ['100% SAF', 'Hybrid-Electric', 'Hydrogen']})
-        fig_sox.update_traces(textposition='outside', textfont_size=12)
-        fig_sox.update_layout(yaxis=dict(range=[0, sox_df['Value'].max() * 1.25]))
-        st.plotly_chart(fig_sox, use_container_width=True, config=dl_config)
-
-    st.divider()
-
-    st.subheader("2. Financial Volume & Profitability (2025 vs 2050)")
     melted_fin = agg_df.melt(id_vars=['Scenario', 'Year'], value_vars=['Total Costs [Billion €]', 'Total Revenue [Billion €]'], var_name='Metric', value_name='Amount')
-    f1, f2 = st.columns(2)
-    with f1:
-        fig_fin = px.bar(melted_fin, x='Scenario', y='Amount', color='Metric', barmode='group', facet_col='Year', 
-                         title="Total Financial Costs vs. Total Revenue (in Billions)",
-                         color_discrete_map={'Total Costs [Billion €]': '#EF553B', 'Total Revenue [Billion €]': '#00CC96'}, category_orders=scenario_order)
-        fig_fin.update_traces(texttemplate='€%{y:,.2f}B', textposition='outside', textfont_size=12)
-        fig_fin.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
-        fig_fin.update_yaxes(range=[0, melted_fin['Amount'].max() * 1.25])
-        st.plotly_chart(fig_fin, use_container_width=True, config=dl_config)
-        
-    with f2:
-        fig_margin = px.bar(agg_df, x='Scenario', y='Profit Margin [%]', color='Year', barmode='group', text_auto='.1f', 
-                            title='Company Profit Margin by Scenario', 
-                            color_discrete_map={'2025': '#94A3B8', '2050': '#3B82F6'}, category_orders=scenario_order)
-        fig_margin.update_traces(texttemplate='%{y:.1f}%', textposition='outside', textfont_size=13, cliponaxis=False)
-        fig_margin.update_layout(yaxis_title="Profit Margin (%)", yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black'))
-        st.plotly_chart(fig_margin, use_container_width=True, config=dl_config)
+    fig_fin = px.bar(melted_fin, x='Scenario', y='Amount', color='Metric', barmode='group', facet_col='Year', 
+                     title="Total Financial Costs vs. Total Revenue (in Billions)",
+                     color_discrete_map={'Total Costs [Billion €]': '#EF553B', 'Total Revenue [Billion €]': '#00CC96'}, category_orders=scenario_order)
+    fig_fin.update_traces(texttemplate='€%{y:,.2f}B', textposition='outside', textfont_size=12)
+    fig_fin.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
+    fig_fin.update_yaxes(range=[0, melted_fin['Amount'].max() * 1.25])
+    st.plotly_chart(fig_fin, use_container_width=True, config=dl_config)
 
-# ==========================================
-# TAB 2: HAUL DEEP DIVE
-# ==========================================
 with tab2:
-    st.subheader("Analysis by Flight Type (Short Haul vs Long Haul)")
-    selected_year = st.radio("Select Year:", ["2025", "2050"], horizontal=True, key="year_tab2")
+    selected_year = st.radio("Select Year for Haul Analysis:", ["2025", "2050"], horizontal=True, key="year_tab2")
     filtered_haul = haul_df[haul_df['Year'] == selected_year]
     
     col_a, col_b = st.columns(2)
@@ -277,61 +279,19 @@ with tab2:
                                title=f"Total Financial Cost by Flight Type ({selected_year})", category_orders=scenario_order)
         st.plotly_chart(fig_haul_cost, use_container_width=True, config=dl_config)
 
-    st.markdown(f"### Exact Haul Data ({selected_year})")
-    display_table = filtered_haul[['Scenario', 'Flight Type', 'Total Costs [€]', 'Total Revenue [€]', 'CO2 Emissions [tons]', 'NOx Emissions [tons]', 'SOx Emissions [tons]']]
-    st.dataframe(display_table, use_container_width=True, hide_index=True)
+    cap_data = filtered_haul.melt(id_vars=['Scenario', 'Flight Type'], value_vars=['Seats', 'Cargo (Tons)'])
+    fig_cap = px.bar(cap_data, x='Flight Type', y='value', color='Scenario', facet_col='variable', 
+                     barmode='group', title=f"Aircraft Capacity: Passenger Seats vs Cargo Volume ({selected_year})", category_orders=scenario_order)
+    fig_cap.update_yaxes(matches=None, showticklabels=True)
+    fig_cap.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
+    fig_cap.update_yaxes(title_text="")
+    st.plotly_chart(fig_cap, use_container_width=True, config=dl_config)
     
-# ==========================================
-# TAB 3: FEASIBILITY
-# ==========================================
 with tab3:
-    st.subheader("Feasibility Assessment")
-    st.markdown("""
-    <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; background-color: #ffffff; padding: 15px; border-radius: 8px; margin-bottom: 20px; color: white;">
-        <div style="background-color: darkgreen; padding: 8px 15px; border-radius: 4px; font-weight: bold; text-align: center; flex: 1; margin: 0 5px;">++ Very strong</div>
-        <div style="background-color: #32CD32; color: black; padding: 8px 15px; border-radius: 4px; font-weight: bold; text-align: center; flex: 1; margin: 0 5px;">+ Strong</div>
-        <div style="background-color: darkorange; padding: 8px 15px; border-radius: 4px; font-weight: bold; text-align: center; flex: 1; margin: 0 5px;">++/- Intermediate</div>
-        <div style="background-color: #FFA500; color: black; padding: 8px 15px; border-radius: 4px; font-weight: bold; text-align: center; flex: 1; margin: 0 5px;">+/- Moderate</div>
-        <div style="background-color: red; padding: 8px 15px; border-radius: 4px; font-weight: bold; text-align: center; flex: 1; margin: 0 5px;">- Challenging</div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    def style_symbols(val):
-        color_mapping = {'++': ('darkgreen', 'white'), '+': ('#32CD32', 'black'), '++/-': ('darkorange', 'white'), '+/-': ('#FFA500', 'black'), '-': ('red', 'white')}
-        val_str = str(val).strip()
-        if val_str in color_mapping:
-            bg_color, text_color = color_mapping[val_str]
-            return f'background-color: {bg_color}; color: {text_color}; font-weight: bold; text-align: center;'
-        return ''
-
-    if hasattr(feasibility.style, 'map'):
-        styled_feasibility = feasibility.style.map(style_symbols)
-    else:
-        styled_feasibility = feasibility.style.applymap(style_symbols)
-        
-    st.dataframe(styled_feasibility, use_container_width=True)
-
-# ==========================================
-# TAB 4: OPERATIONAL KPIs
-# ==========================================
-with tab4:
-    st.subheader("Operational & Technical KPIs")
-    st.markdown("Detailed visualization of ticket prices, energy mix, and aircraft capacity.")
-    
-    ops_year = st.radio("Select Year for Operational Data:", ["2025", "2050"], horizontal=True, key="year_tab4")
+    ops_year = st.radio("Select Year for Energy Data:", ["2025", "2050"], horizontal=True, key="year_tab4")
     ops_data = haul_df[haul_df['Year'] == ops_year]
     
-    # 1. Ticket Price Graph
-    fig_tickets = px.bar(ops_data, x='Flight Type', y='Ticket Price [€]', color='Scenario', barmode='group', 
-                         title=f"Average Ticket Price per Passenger ({ops_year})", category_orders=scenario_order,
-                         color_discrete_sequence=px.colors.qualitative.Pastel)
-    fig_tickets.update_traces(texttemplate='€%{y:,.0f}', textposition='outside')
-    fig_tickets.update_layout(yaxis=dict(range=[0, ops_data['Ticket Price [€]'].max() * 1.25]))
-    st.plotly_chart(fig_tickets, use_container_width=True, config=dl_config)
-    
-    # 2. Energy Mix Graph 
     energy_data = ops_data.melt(id_vars=['Scenario', 'Flight Type'], value_vars=['Liquid Fuel', 'Hydrogen', 'Electricity'])
-    
     fig_energy = px.bar(energy_data, x='Flight Type', y='value', color='Scenario', facet_col='variable', 
                         barmode='group', 
                         title=f"Average Energy Consumption per Flight by Source ({ops_year})", 
@@ -341,14 +301,3 @@ with tab4:
     fig_energy.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
     fig_energy.update_yaxes(title_text="")
     st.plotly_chart(fig_energy, use_container_width=True, config=dl_config)
-
-    # 3. Capacity Graph 
-    cap_data = ops_data.melt(id_vars=['Scenario', 'Flight Type'], value_vars=['Seats', 'Cargo (Tons)'])
-    
-    fig_cap = px.bar(cap_data, x='Flight Type', y='value', color='Scenario', facet_col='variable', 
-                     barmode='group', title=f"Aircraft Capacity: Passenger Seats vs Cargo Volume ({ops_year})", category_orders=scenario_order)
-    
-    fig_cap.update_yaxes(matches=None, showticklabels=True)
-    fig_cap.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
-    fig_cap.update_yaxes(title_text="")
-    st.plotly_chart(fig_cap, use_container_width=True, config=dl_config)
