@@ -17,7 +17,7 @@ dl_config = {
 }
 
 # ----------------------------------------------------
-# 2. CRASH-PROOF DATA LOADING
+# 2. SLIMME DATA LOADING (Geen lege grafieken meer)
 # ----------------------------------------------------
 @st.cache_data
 def load_data():
@@ -38,7 +38,7 @@ def load_data():
             if any(k in str(c).lower() for k in keywords): 
                 val = df[c]
                 return val.iloc[:, 0] if isinstance(val, pd.DataFrame) else val
-        return pd.Series([0]*len(df))
+        return pd.Series([0]*len(df), index=df.index)
 
     dfs = []
     for sheet, (scenario, year) in sheet_map.items():
@@ -47,6 +47,13 @@ def load_data():
             if df.empty: continue
             
             temp = pd.DataFrame()
+            
+            # Flight type slimmer zoeken
+            ft_col = get_col(df, ['flight type', 'route', 'vlucht'])
+            if (ft_col == 0).all() and len(df.columns) > 0:
+                ft_col = df.iloc[:, 0]
+            temp['Flight Type'] = ft_col.astype(str).str.strip()
+            
             freq = pd.to_numeric(get_col(df, ['frequency', 'flights']), errors='coerce').fillna(1)
             temp['Total Costs [€]'] = pd.to_numeric(get_col(df, ['total cost']), errors='coerce').fillna(0) * freq
             
@@ -62,18 +69,26 @@ def load_data():
             temp['Ticket Price [€]'] = pd.to_numeric(get_col(df, ['ticket']), errors='coerce').fillna(0)
             temp['Seats'] = pd.to_numeric(get_col(df, ['seat']), errors='coerce').fillna(0)
             temp['Cargo (Tons)'] = pd.to_numeric(get_col(df, ['cargo']), errors='coerce').fillna(0)
-            temp['Flight Type'] = df.iloc[:,0] 
             
             if scenario in ['Baseline', '100% SAF']: 
                 temp['Liquid Fuel'] = pd.to_numeric(get_col(df, ['fuel']), errors='coerce').fillna(0)
+                temp['Electricity'] = 0
+                temp['Hydrogen'] = 0
             elif scenario == 'Hybrid-Electric': 
                 temp['Liquid Fuel'] = pd.to_numeric(get_col(df, ['hefa']), errors='coerce').fillna(0)
                 temp['Electricity'] = pd.to_numeric(get_col(df, ['electric']), errors='coerce').fillna(0)
+                temp['Hydrogen'] = 0
             elif scenario == 'Hydrogen': 
+                temp['Liquid Fuel'] = 0
+                temp['Electricity'] = 0
                 temp['Hydrogen'] = pd.to_numeric(get_col(df, ['hydrogen']), errors='coerce').fillna(0)
 
             temp['Scenario'], temp['Year'] = scenario, year
-            dfs.append(temp.dropna(subset=['Flight Type']))
+            
+            # SLIMME FILTER: Bewaar de rij zolang er Kosten óf CO2 is ingevuld (voorkomt weggooien van data!)
+            temp = temp[(temp['Total Costs [€]'] > 0) | (temp['CO2 Emissions [tons]'] > 0)]
+            
+            dfs.append(temp)
         except Exception:
             continue
 
@@ -81,7 +96,6 @@ def load_data():
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), "⚠️ FOUT: Geen data kunnen inlezen. Controleer de opmaak van het Excel bestand."
         
     routes_df = pd.concat(dfs, ignore_index=True)
-    routes_df = routes_df[routes_df['Flight Type'].astype(str).str.strip() != '0']
     
     agg_df = routes_df.groupby(['Scenario', 'Year']).agg({'Total Costs [€]': 'sum', 'Total Revenue [€]': 'sum', 'CO2 Emissions [tons]': 'sum'}).reset_index()
     agg_df['Total Costs [Billion €]'] = agg_df['Total Costs [€]'] / 1e9
@@ -154,7 +168,6 @@ with col2:
                      title="💰 Financial Feasibility: Costs vs Revenue (Billion €)", category_orders=scenario_order,
                      color_discrete_map={'Total Costs [Billion €]': '#EF553B', 'Total Revenue [Billion €]': '#00CC96'})
     fig_fin.update_traces(texttemplate='€%{y:,.1f}B', textposition='outside')
-    # OPGELOST: ybottom is nu simpelweg y!
     fig_fin.update_layout(yaxis=dict(range=[0, safe_max(melted_fin['Amount'])]), legend=dict(orientation="h", y=-0.2, yanchor="top", xanchor="center", x=0.5))
     st.plotly_chart(fig_fin, use_container_width=True, config=dl_config)
 
@@ -198,7 +211,7 @@ ops_year = st.radio("Select Year for detailed breakdown:", ["2025", "2050"], hor
 filtered_haul = haul_df[haul_df['Year'] == ops_year]
 
 if filtered_haul.empty:
-    st.warning(f"Geen data beschikbaar voor jaar {ops_year}")
+    st.warning(f"Geen detaildata beschikbaar voor jaar {ops_year}")
 else:
     col_a, col_b = st.columns(2)
     with col_a:
