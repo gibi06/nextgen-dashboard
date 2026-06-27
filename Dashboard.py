@@ -23,9 +23,9 @@ dl_config = {
 def load_data():
     file_path = "Cost Calculation Scenarios.xlsx"
     
-    # 1. Check of het bestand bestaat (Voorkomt de crash bij Wouter/Spyder!)
+    # 1. Check of het bestand bestaat
     if not os.path.exists(file_path):
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), f"⚠️ FOUT: Bestand '{file_path}' niet gevonden! Zorg dat het Excel-bestand in exact dezelfde map staat als dit Dashboard.py script."
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), f"⚠️ FOUT: Bestand '{file_path}' niet gevonden! Zorg dat het Excel-bestand in exact dezelfde map staat als dit script."
 
     sheet_map = {
         'Baseline 2025': ('Baseline', '2025'), 'Baseline 2050': ('Baseline', '2050'),
@@ -34,7 +34,7 @@ def load_data():
         'Scenario 3 2025': ('Hydrogen', '2025'), 'Scenario 3 2050': ('Hydrogen', '2050')
     }
 
-    # Veilig zoeken naar kolommen, ongeacht typefouten in Excel
+    # Veilig zoeken naar kolommen
     def get_col(df, keywords):
         for c in df.columns:
             if any(k in str(c).lower() for k in keywords): 
@@ -76,8 +76,6 @@ def load_data():
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), "⚠️ FOUT: Geen data kunnen inlezen. Controleer de opmaak van het Excel bestand."
         
     routes_df = pd.concat(dfs, ignore_index=True)
-    
-    # Verwijder lege of '0' rijen
     routes_df = routes_df[routes_df['Flight Type'].astype(str).str.strip() != '0']
     
     agg_df = routes_df.groupby(['Scenario', 'Year']).agg({'Total Costs [€]': 'sum', 'Total Revenue [€]': 'sum', 'CO2 Emissions [tons]': 'sum'}).reset_index()
@@ -106,12 +104,10 @@ agg_df, haul_df, feasibility, error_msg = load_data()
 # ----------------------------------------------------
 st.title("🌍 NextGen Innovation Strategy Dashboard")
 
-# Foutmelding afhandeling (Geen lelijke crashende codes meer!)
 if error_msg:
     st.error(error_msg)
     st.stop()
 
-# --- DATA TRANSPARENCY (Bovenaan, zoals geëist) ---
 st.info("""
 **📚 Data Transparency & Sources:**
 All KPIs and metrics displayed in this dashboard are calculated using data directly extracted from the project file: **`Cost Calculation Scenarios.xlsx`**. 
@@ -124,14 +120,22 @@ st.header("1. Executive Summary: KPI Overview (2050 Projection)")
 st.markdown("This section provides a complete visual overview of all required Sustainability, Financial, and Feasibility KPIs across the 2050 transition strategies.")
 
 scenario_order = {'Scenario': ['Baseline', '100% SAF', 'Hybrid-Electric', 'Hydrogen']}
-df_2050 = agg_df[agg_df['Year'] == '2050'].copy()
-if not df_2050.empty:
-    df_2050['CO2 Emissions [kton]'] = df_2050['CO2 Emissions [tons]'] / 1000
 
-# Veilige rekenhulp om ValueError ('cannot compute max of empty') te voorkomen
+# --- BULLETPROOF MAX FUNCTION ---
 def safe_max(series):
-    m = series.max()
-    return m * 1.25 if pd.notna(m) and m > 0 else 1
+    try:
+        m = pd.to_numeric(series, errors='coerce').max()
+        if pd.isna(m) or m <= 0 or m == float('inf'):
+            return 1.0
+        return float(m * 1.25)
+    except Exception:
+        return 1.0
+
+# Extract 2050 data or create dummy if empty
+df_2050 = agg_df[agg_df['Year'] == '2050'].copy()
+if df_2050.empty:
+    df_2050 = pd.DataFrame({'Scenario': ['Baseline'], 'CO2 Emissions [tons]': [0], 'Total Costs [Billion €]': [0], 'Total Revenue [Billion €]': [0]})
+df_2050['CO2 Emissions [kton]'] = df_2050['CO2 Emissions [tons]'] / 1000
 
 col1, col2 = st.columns(2)
 
@@ -156,6 +160,9 @@ col3, col4 = st.columns(2)
 
 with col3:
     ticket_2050 = haul_df[haul_df['Year'] == '2050'].groupby('Scenario')['Ticket Price [€]'].mean().reset_index()
+    if ticket_2050.empty:
+        ticket_2050 = pd.DataFrame({'Scenario': ['Baseline'], 'Ticket Price [€]': [0]})
+        
     fig_ticket = px.bar(ticket_2050, x='Scenario', y='Ticket Price [€]', color='Scenario',
                         title="✈️ Average Consumer Ticket Price (€)", category_orders=scenario_order,
                         color_discrete_sequence=px.colors.qualitative.Prism)
@@ -174,7 +181,6 @@ with col4:
             return f'background-color: {color_mapping[val_str][0]}; color: {color_mapping[val_str][1]}; font-weight: bold; text-align: center;'
         return 'text-align: center;'
     
-    # Compatibiliteit voor zowel oudere als nieuwere Pandas versies
     if hasattr(feasibility.style, 'map'):
         st.dataframe(feasibility.style.map(style_symbols), use_container_width=True)
     else:
@@ -183,23 +189,26 @@ with col4:
 st.divider()
 
 # ----------------------------------------------------
-# 4. DEEP DIVE (Directly below, no tabs!)
+# 4. DEEP DIVE 
 # ----------------------------------------------------
 st.header("2. Deep-Dive: Flight Type & Energy Analysis")
 ops_year = st.radio("Select Year for detailed breakdown:", ["2025", "2050"], horizontal=True)
 filtered_haul = haul_df[haul_df['Year'] == ops_year]
 
-col_a, col_b = st.columns(2)
-with col_a:
-    fig_haul_co2 = px.bar(filtered_haul, x='Flight Type', y='CO2 Emissions [tons]', color='Scenario', barmode='group', title=f"Total CO₂ by Flight Type ({ops_year})", category_orders=scenario_order)
-    st.plotly_chart(fig_haul_co2, use_container_width=True, config=dl_config)
+if filtered_haul.empty:
+    st.warning(f"Geen data beschikbaar voor jaar {ops_year}")
+else:
+    col_a, col_b = st.columns(2)
+    with col_a:
+        fig_haul_co2 = px.bar(filtered_haul, x='Flight Type', y='CO2 Emissions [tons]', color='Scenario', barmode='group', title=f"Total CO₂ by Flight Type ({ops_year})", category_orders=scenario_order)
+        st.plotly_chart(fig_haul_co2, use_container_width=True, config=dl_config)
 
-with col_b:
-    energy_data = filtered_haul.melt(id_vars=['Scenario', 'Flight Type'], value_vars=['Liquid Fuel', 'Hydrogen', 'Electricity'])
-    fig_energy = px.bar(energy_data, x='Flight Type', y='value', color='Scenario', facet_col='variable', barmode='group', title=f"Energy Consumption by Source ({ops_year})", category_orders=scenario_order)
-    fig_energy.update_yaxes(matches=None, showticklabels=True)
-    fig_energy.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
-    fig_energy.update_yaxes(title_text="")
-    st.plotly_chart(fig_energy, use_container_width=True, config=dl_config)
+    with col_b:
+        energy_data = filtered_haul.melt(id_vars=['Scenario', 'Flight Type'], value_vars=['Liquid Fuel', 'Hydrogen', 'Electricity'])
+        fig_energy = px.bar(energy_data, x='Flight Type', y='value', color='Scenario', facet_col='variable', barmode='group', title=f"Energy Consumption by Source ({ops_year})", category_orders=scenario_order)
+        fig_energy.update_yaxes(matches=None, showticklabels=True)
+        fig_energy.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
+        fig_energy.update_yaxes(title_text="")
+        st.plotly_chart(fig_energy, use_container_width=True, config=dl_config)
 
 st.markdown("<div style='text-align: center; color: gray;'><br><br><i>NextGen Aviation - End of Dashboard Overview</i></div>", unsafe_allow_html=True)
