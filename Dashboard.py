@@ -23,9 +23,8 @@ dl_config = {
 def load_data():
     file_path = "Cost Calculation Scenarios.xlsx"
     
-    # 1. Check of het bestand bestaat
     if not os.path.exists(file_path):
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), f"⚠️ FOUT: Bestand '{file_path}' niet gevonden! Zorg dat het Excel-bestand in exact dezelfde map staat als dit script."
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), f"⚠️ FOUT: Bestand '{file_path}' niet gevonden! Zorg dat de naam EXACT overeenkomt (inclusief hoofdletters) en in dezelfde map op GitHub staat."
 
     sheet_map = {
         'Baseline 2025': ('Baseline', '2025'), 'Baseline 2050': ('Baseline', '2050'),
@@ -34,24 +33,30 @@ def load_data():
         'Scenario 3 2025': ('Hydrogen', '2025'), 'Scenario 3 2050': ('Hydrogen', '2050')
     }
 
-    # Veilig zoeken naar kolommen
     def get_col(df, keywords):
         for c in df.columns:
             if any(k in str(c).lower() for k in keywords): 
-                return df[c]
+                val = df[c]
+                return val.iloc[:, 0] if isinstance(val, pd.DataFrame) else val
         return pd.Series([0]*len(df))
 
     dfs = []
     for sheet, (scenario, year) in sheet_map.items():
         try:
             df = pd.read_excel(file_path, sheet_name=sheet, skiprows=5)
-            temp = pd.DataFrame()
+            if df.empty: continue
             
+            temp = pd.DataFrame()
             freq = pd.to_numeric(get_col(df, ['frequency', 'flights']), errors='coerce').fillna(1)
             temp['Total Costs [€]'] = pd.to_numeric(get_col(df, ['total cost']), errors='coerce').fillna(0) * freq
             
             rev_col = [c for c in df.columns if 'revenue' in str(c).lower()]
-            temp['Total Revenue [€]'] = pd.to_numeric(df[rev_col[0]] if rev_col else [0]*len(df), errors='coerce').fillna(0) * freq
+            if rev_col:
+                rev_val = df[rev_col[0]]
+                rev_data = rev_val.iloc[:, 0] if isinstance(rev_val, pd.DataFrame) else rev_val
+            else:
+                rev_data = pd.Series([0]*len(df))
+            temp['Total Revenue [€]'] = pd.to_numeric(rev_data, errors='coerce').fillna(0) * freq
             
             temp['CO2 Emissions [tons]'] = pd.to_numeric(get_col(df, ['co2']), errors='coerce').fillna(0)
             temp['Ticket Price [€]'] = pd.to_numeric(get_col(df, ['ticket']), errors='coerce').fillna(0)
@@ -100,7 +105,7 @@ def load_data():
 agg_df, haul_df, feasibility, error_msg = load_data()
 
 # ----------------------------------------------------
-# 3. UI LAYOUT (STRICTLY ONE PAGE DESIGN)
+# 3. UI LAYOUT
 # ----------------------------------------------------
 st.title("🌍 NextGen Innovation Strategy Dashboard")
 
@@ -121,17 +126,13 @@ st.markdown("This section provides a complete visual overview of all required Su
 
 scenario_order = {'Scenario': ['Baseline', '100% SAF', 'Hybrid-Electric', 'Hydrogen']}
 
-# --- BULLETPROOF MAX FUNCTION ---
 def safe_max(series):
     try:
         m = pd.to_numeric(series, errors='coerce').max()
-        if pd.isna(m) or m <= 0 or m == float('inf'):
-            return 1.0
-        return float(m * 1.25)
+        return float(m * 1.25) if pd.notna(m) and m > 0 and m != float('inf') else 1.0
     except Exception:
         return 1.0
 
-# Extract 2050 data or create dummy if empty
 df_2050 = agg_df[agg_df['Year'] == '2050'].copy()
 if df_2050.empty:
     df_2050 = pd.DataFrame({'Scenario': ['Baseline'], 'CO2 Emissions [tons]': [0], 'Total Costs [Billion €]': [0], 'Total Revenue [Billion €]': [0]})
@@ -153,7 +154,8 @@ with col2:
                      title="💰 Financial Feasibility: Costs vs Revenue (Billion €)", category_orders=scenario_order,
                      color_discrete_map={'Total Costs [Billion €]': '#EF553B', 'Total Revenue [Billion €]': '#00CC96'})
     fig_fin.update_traces(texttemplate='€%{y:,.1f}B', textposition='outside')
-    fig_fin.update_layout(yaxis=dict(range=[0, safe_max(melted_fin['Amount'])]), legend=dict(orientation="h", ybottom=-0.2, yanchor="top", xanchor="center", x=0.5))
+    # OPGELOST: ybottom is nu simpelweg y!
+    fig_fin.update_layout(yaxis=dict(range=[0, safe_max(melted_fin['Amount'])]), legend=dict(orientation="h", y=-0.2, yanchor="top", xanchor="center", x=0.5))
     st.plotly_chart(fig_fin, use_container_width=True, config=dl_config)
 
 col3, col4 = st.columns(2)
